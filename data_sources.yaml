@@ -1,0 +1,35 @@
+series:
+  - name: "CPI-AU"
+    source: "fred"
+    id: "CPALTT01AUA661S"
+    freq: "M"
+    
+  - name: "Gold-LBMA"
+    source: "fred"
+    id: "LBMA/GOLD"
+    freq: "D"
+    
+  - name: "S&P 500"
+    source: "yahoo"
+    ticker: "^GSPC"
+    freq: "D"
+    
+  - name: "Fear-and-Greed"
+    source: "fng"
+    freq: "D"
+    
+  - name: "BTC Trends"
+    source: "trends"
+    kw: "bitcoin"
+    freq: "D"
+    
+  - name: "BTCUSDT"
+    source: "binance"
+    symbol: "BTCUSDT"
+    interval: "1d"
+    freq: "D"
+
+defaults:
+  lookback_days: 730
+  max_lag: 10
+  top_n: 5 
