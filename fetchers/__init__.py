@@ -1,20 +1,20 @@
 """
-Data fetchers package for retrieving financial data from various sources.
+Data fetchers package.
 """
 
-from .base import BaseFetcher, fetcher_registry
+from .base import fetcher_registry, register_fetcher
+from .binance import BinanceFetcher
+from .trends import TrendsFetcher
 from .fred import FredFetcher
 from .yahoo import YahooFetcher
 from .fng import FearGreedFetcher
-from .trends import TrendsFetcher
-from .binance import BinanceFetcher
 
 __all__ = [
-    'BaseFetcher',
     'fetcher_registry',
-    'FredFetcher',
-    'YahooFetcher', 
-    'FearGreedFetcher',
+    'register_fetcher',
+    'BinanceFetcher',
     'TrendsFetcher',
-    'BinanceFetcher'
+    'FredFetcher',
+    'YahooFetcher',
+    'FearGreedFetcher'
 ] 

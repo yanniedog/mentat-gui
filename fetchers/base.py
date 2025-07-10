@@ -3,7 +3,6 @@ Base fetcher class and registry for data sources.
 """
 
 import asyncio
-import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -11,7 +10,9 @@ import pandas as pd
 import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-logger = logging.getLogger(__name__)
+from config import get_logger
+
+logger = get_logger(__name__)
 
 class BaseFetcher(ABC):
     """Abstract base class for data fetchers."""
@@ -97,5 +98,12 @@ class BaseFetcher(ABC):
         # Remove any NaN values at the beginning
         return aligned.dropna()
 
-# Global fetcher registry
-fetcher_registry: Dict[str, BaseFetcher] = {} 
+# Registry for fetcher classes
+fetcher_registry: Dict[str, type] = {}
+
+def register_fetcher(source_name: str):
+    """Decorator to register a fetcher class."""
+    def decorator(fetcher_class):
+        fetcher_registry[source_name] = fetcher_class
+        return fetcher_class
+    return decorator 

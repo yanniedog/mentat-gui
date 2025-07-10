@@ -2,18 +2,18 @@
 Google Trends fetcher with caching.
 """
 
-import logging
 import pickle
 from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime, timedelta
 import pandas as pd
 from pytrends.request import TrendReq
-from .base import BaseFetcher, fetcher_registry
-from config import get_settings
+from .base import BaseFetcher, register_fetcher
+from config import get_settings, get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
+@register_fetcher("trends")
 class TrendsFetcher(BaseFetcher):
     """Fetcher for Google Trends data with caching."""
     
@@ -53,7 +53,7 @@ class TrendsFetcher(BaseFetcher):
         self, 
         start: datetime, 
         end: datetime, 
-        keyword: str,
+        kw: str = None,
         **kwargs: Any
     ) -> pd.Series:
         """
@@ -62,22 +62,32 @@ class TrendsFetcher(BaseFetcher):
         Args:
             start: Start date
             end: End date
-            keyword: Search keyword
-            **kwargs: Additional parameters
+            kw: Search keyword
             
         Returns:
-            pandas Series with datetime index
+            pandas Series with trends data
         """
-        self._validate_date_range(start, end)
+        keyword = kw or kwargs.get('keyword', 'bitcoin')
         
         # Check cache first
         cache_path = self._get_cache_path(keyword, start, end)
         cached_data = self._load_from_cache(cache_path)
-        if cached_data is not None:
+        
+        if cached_data is not None and not cached_data.empty:
             logger.info(f"Using cached trends data for {keyword}")
             return cached_data
         
-        # Fetch from Google Trends
+        # Fetch from API
+        return await self._fetch_from_api(start, end, keyword, cache_path)
+    
+    async def _fetch_from_api(
+        self, 
+        start: datetime, 
+        end: datetime, 
+        keyword: str,
+        cache_path: Path
+    ) -> pd.Series:
+        """Fetch data from Google Trends API."""
         try:
             # Build payload
             timeframe = f"{start.strftime('%Y-%m-%d')} {end.strftime('%Y-%m-%d')}"
@@ -86,29 +96,24 @@ class TrendsFetcher(BaseFetcher):
             self.pytrends.build_payload([keyword], cat=0, timeframe=timeframe, geo='', gprop='')
             
             # Get interest over time
-            interest_df = self.pytrends.interest_over_time()
+            data = self.pytrends.interest_over_time()
             
-            if interest_df.empty:
+            if data.empty:
                 logger.warning(f"No trends data found for keyword: {keyword}")
-                return pd.Series(dtype=float)
+                return pd.Series()
             
             # Extract the keyword column
-            series = interest_df[keyword]
+            series = data[keyword]
             
             # Filter to requested date range
             series = series[(series.index >= start) & (series.index <= end)]
             
-            # Align to daily frequency
-            aligned_series = self._align_series(series, 'D')
-            
             # Cache the result
-            self._save_to_cache(cache_path, aligned_series)
+            if not series.empty:
+                self._save_to_cache(cache_path, series)
             
-            return aligned_series
+            return series
             
         except Exception as e:
             logger.error(f"Failed to fetch trends data for {keyword}: {e}")
-            return pd.Series(dtype=float)
-
-# Register the fetcher
-fetcher_registry['trends'] = TrendsFetcher() 
+            return pd.Series() 

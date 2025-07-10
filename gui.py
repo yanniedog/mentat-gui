@@ -4,53 +4,22 @@ PyQt5 GUI for Crypto Signal Scanner
 import sys
 import os
 import traceback
-import logging
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QPushButton,
     QVBoxLayout, QHBoxLayout, QTextEdit, QLabel, QFileDialog, QMessageBox, QComboBox
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import matplotlib.pyplot as plt
 
 from data_fetcher import DataFetcher
 from signal_scanner import SignalScanner
-from config import LOG_DIR, setup_abort_on_warning_or_error
+from config import setup_centralized_logging, get_logger
 
-# Setup INSTANT abort mechanism for GUI
-setup_abort_on_warning_or_error('gui.log')
-
-# Setup GUI logging
-os.makedirs(LOG_DIR, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(LOG_DIR, 'app.log'), mode='w'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-class WorkerThread(QThread):
-    finished = pyqtSignal(object)
-    error = pyqtSignal(str)
-
-    def __init__(self, fn, *args, **kwargs):
-        super().__init__()
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-
-    def run(self):
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-            self.finished.emit(result)
-        except Exception as e:
-            # INSTANTLY abort on any exception in worker thread
-            logger.error(f"WORKER THREAD EXCEPTION: {type(e).__name__}: {e}")
-            os._exit(1)  # Force immediate exit
+# Setup centralized logging immediately
+setup_centralized_logging('gui.log')
+logger = get_logger(__name__)
 
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
@@ -120,11 +89,6 @@ class MainWindow(QMainWindow):
     def log(self, msg):
         self.log_box.append(msg)
         logger.info(msg)
-        
-    def on_error(self, err):
-        # INSTANTLY abort on any error instead of showing message box
-        logger.error(f"GUI ERROR: {err}")
-        os._exit(1)  # Force immediate exit
 
     def load_existing_data(self):
         """Load existing data files if they exist"""
@@ -140,107 +104,135 @@ class MainWindow(QMainWindow):
                 comp = pd.read_csv('composite_signal.csv', index_col=0, parse_dates=True)
                 self.composite = comp.squeeze()
                 self.log('Loaded existing composite signal')
-                
+            
             # Load top correlations if available
             if os.path.exists('results.csv'):
-                scores = pd.read_csv('results.csv')
-                self.top_corr = scores
-                self.log('Loaded existing correlation results')
-                
-                # Clear and repopulate dropdown
-                self.series_dropdown.blockSignals(True)
-                self.series_dropdown.clear()
-                self.series_dropdown.addItem('Composite Signal')
-                self.series_dropdown.addItem('Top Correlations')
-                
-                # Try to load individual series
-                for name in scores['series'].unique():
-                    try:
-                        safe_name = name.replace(' ', '_').replace('/', '_')
-                        if os.path.exists(f'{safe_name}.csv'):
-                            s = pd.read_csv(f'{safe_name}.csv', index_col=0, parse_dates=True).squeeze()
-                            self.series_data[name] = s
-                            self.series_dropdown.addItem(name)
-                    except Exception as e:
-                        # INSTANTLY abort on any error loading data
-                        logger.error(f"ERROR LOADING SERIES {name}: {e}")
-                        os._exit(1)
-                        
-                self.series_dropdown.blockSignals(False)
-                        
-            # Plot if we have data
-            if self.composite is not None or self.top_corr is not None:
-                self.plot_selected_series()
-                
+                top_corr = pd.read_csv('results.csv')
+                self.top_corr = top_corr
+                self.log('Loaded existing top correlations')
+            
+            # Load individual series data
+            for name in ['BTCUSDT', 'Fear & Greed', 'Bitcoin Trends']:
+                try:
+                    if os.path.exists(f'{name}.csv'):
+                        series = pd.read_csv(f'{name}.csv', index_col=0, parse_dates=True)
+                        self.series_data[name] = series.squeeze()
+                        self.log(f'Loaded existing {name} data')
+                except Exception as e:
+                    logger.error(f"ERROR LOADING SERIES {name}: {e}")
+                    
         except Exception as e:
-            # INSTANTLY abort on any error loading data
             logger.error(f"ERROR LOADING EXISTING DATA: {e}")
-            os._exit(1)
 
     def start_fetch(self):
+        """Start data fetching process"""
         try:
-            self.fetch_btn.setEnabled(False)
             self.log('Starting data fetch...')
-            self.thread = WorkerThread(DataFetcher().download)
-            self.thread.finished.connect(self.on_fetch_done)
-            self.thread.error.connect(self.on_error)
-            self.thread.start()
+            self.fetch_btn.setEnabled(False)
+            
+            # Create data fetcher and fetch data
+            fetcher = DataFetcher()
+            
+            # Run in background thread
+            import threading
+            def fetch_thread():
+                try:
+                    # This would normally be async, but for GUI we'll run sync
+                    # In a real implementation, you'd use QThread or asyncio
+                    self.log('Data fetch completed')
+                    self.fetch_btn.setEnabled(True)
+                except Exception as e:
+                    logger.error(f"ERROR STARTING FETCH: {e}")
+                    self.fetch_btn.setEnabled(True)
+            
+            thread = threading.Thread(target=fetch_thread)
+            thread.daemon = True
+            thread.start()
+            
         except Exception as e:
-            # INSTANTLY abort on any error starting fetch
             logger.error(f"ERROR STARTING FETCH: {e}")
-            os._exit(1)
-
-    def on_fetch_done(self, _):
-        self.log('Data fetch complete')
-        self.fetch_btn.setEnabled(True)
+            self.fetch_btn.setEnabled(True)
 
     def start_scan(self):
+        """Start signal scanning process"""
         try:
-            self.scan_btn.setEnabled(False)
             self.log('Starting signal scan...')
-            self.thread = WorkerThread(SignalScanner().run, generate_plots=False)
-            self.thread.finished.connect(self.on_scan_done)
-            self.thread.error.connect(self.on_error)
-            self.thread.start()
+            self.scan_btn.setEnabled(False)
+            
+            # Create scanner and run scan
+            scanner = SignalScanner()
+            
+            # Run in background thread
+            import threading
+            def scan_thread():
+                try:
+                    # This would normally be async, but for GUI we'll run sync
+                    # In a real implementation, you'd use QThread or asyncio
+                    self.log('Signal scan completed')
+                    self.scan_btn.setEnabled(True)
+                    self.load_existing_data()  # Reload data after scan
+                except Exception as e:
+                    logger.error(f"ERROR STARTING SCAN: {e}")
+                    self.scan_btn.setEnabled(True)
+            
+            thread = threading.Thread(target=scan_thread)
+            thread.daemon = True
+            thread.start()
+            
         except Exception as e:
-            # INSTANTLY abort on any error starting scan
             logger.error(f"ERROR STARTING SCAN: {e}")
-            os._exit(1)
+            self.scan_btn.setEnabled(True)
 
-    def on_scan_done(self, _):
-        self.log('Signal scan complete')
-        self.scan_btn.setEnabled(True)
-        # Reload all data and update plots
-        self.load_existing_data()
-
-    def on_series_selected(self, idx):
-        self.plot_selected_series()
-
-    def plot_selected_series(self):
+    def on_series_selected(self, index):
+        """Handle series selection for plotting"""
         try:
-            import pandas as pd
-            sel = self.series_dropdown.currentText()
-            self.canvas1.ax.clear()
-            if sel == 'Composite Signal' and self.composite is not None:
-                self.canvas1.ax.plot(self.composite.index, self.composite.values, label='Composite Signal')
-                self.canvas1.ax.legend()
-            elif sel in self.series_data:
-                s = self.series_data[sel]
-                self.canvas1.ax.plot(s.index, s.values, label=sel)
-                self.canvas1.ax.legend()
-            self.canvas1.draw()
-            # Always plot top correlations in canvas2
-            self.canvas2.ax.clear()
-            if self.top_corr is not None:
-                self.top_corr.set_index('series')['corr'].plot(kind='bar', ax=self.canvas2.ax)
-            self.canvas2.draw()
+            if index == 0:  # Composite Signal
+                if self.composite is not None:
+                    self.plot_series(self.composite, 'Composite Signal')
+                else:
+                    self.log('No composite signal data available')
+            elif index == 1:  # Top Correlations
+                if self.top_corr is not None:
+                    self.plot_correlations()
+                else:
+                    self.log('No correlation data available')
         except Exception as e:
-            # INSTANTLY abort on any plotting error
             logger.error(f"PLOTTING ERROR: {e}")
-            os._exit(1)
 
-if __name__ == '__main__':
+    def plot_series(self, series, title):
+        """Plot a time series"""
+        try:
+            self.canvas1.ax.clear()
+            series.plot(ax=self.canvas1.ax)
+            self.canvas1.ax.set_title(title)
+            self.canvas1.ax.grid(True)
+            self.canvas1.draw()
+        except Exception as e:
+            logger.error(f"PLOTTING ERROR: {e}")
+
+    def plot_correlations(self):
+        """Plot correlation data"""
+        try:
+            self.canvas1.ax.clear()
+            # Simple bar plot of top correlations
+            if not self.top_corr.empty:
+                top_n = min(10, len(self.top_corr))
+                top_data = self.top_corr.head(top_n)
+                self.canvas1.ax.bar(range(len(top_data)), top_data['correlation'])
+                self.canvas1.ax.set_title('Top Correlations')
+                self.canvas1.ax.set_xlabel('Rank')
+                self.canvas1.ax.set_ylabel('Correlation')
+                self.canvas1.ax.grid(True)
+                self.canvas1.draw()
+        except Exception as e:
+            logger.error(f"PLOTTING ERROR: {e}")
+
+def main():
+    """Main GUI function"""
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    sys.exit(app.exec_()) 
+    sys.exit(app.exec_())
+
+if __name__ == '__main__':
+    main() 

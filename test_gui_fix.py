@@ -1,78 +1,106 @@
 #!/usr/bin/env python3
 """
-Test script to verify GUI fixes work correctly
+Test script to verify GUI fixes are working correctly.
 """
-import sys
+
 import os
-from config import setup_abort_on_warning_or_error
-setup_abort_on_warning_or_error('test.log')
+import sys
+from pathlib import Path
 
-# Add current directory to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Setup centralized logging immediately
+from config import setup_centralized_logging, get_logger
 
-from signal_scanner import SignalScanner
+setup_centralized_logging('test.log')
+logger = get_logger(__name__)
 
-def test_signal_scanner_no_plots():
-    """Test that signal scanner works without generating plots"""
-    print("Testing signal scanner without plot generation...")
-    
+def test_signal_scanner_without_plots():
+    """Test signal scanner without plot generation."""
     try:
+        logger.info("Testing signal scanner without plot generation...")
+        
+        from signal_scanner import SignalScanner
         scanner = SignalScanner()
-        scanner.run(generate_plots=False)
-        print("✓ Signal scanner completed successfully without plots")
         
-        # Check that CSV files were created
-        required_files = ['composite_signal.csv', 'results.csv']
-        for file in required_files:
-            if os.path.exists(file):
-                print(f"✓ {file} was created")
-            else:
-                print(f"✗ {file} was not created")
-                
-        # Check that plot files were NOT created
-        plot_files = ['composite_signal.png', 'correlations.png']
-        for file in plot_files:
-            if not os.path.exists(file):
-                print(f"✓ {file} was NOT created (as expected)")
-            else:
-                print(f"✗ {file} was created (unexpected)")
-                
+        # Run scan without plots
+        results = scanner.run(generate_plots=False)
+        
+        if 'error' in results:
+            logger.error(f"Signal scanner failed: {results['error']}")
+            return False
+        
+        logger.info("✓ Signal scanner completed successfully without plots")
+        return True
+        
     except Exception as e:
-        print(f"✗ Signal scanner failed: {e}")
+        logger.error(f"✗ Signal scanner failed: {e}")
         return False
-        
-    return True
+
+def test_file_creation():
+    """Test that expected files are created."""
+    expected_files = ['results.csv', 'composite_signal.csv']
+    
+    for file in expected_files:
+        if os.path.exists(file):
+            logger.info(f"✓ {file} was created")
+        else:
+            logger.warning(f"✗ {file} was not created")
+    
+    # Test that plot files are NOT created when generate_plots=False
+    plot_files = ['correlations.png', 'composite_signal.png']
+    for file in plot_files:
+        if not os.path.exists(file):
+            logger.info(f"✓ {file} was NOT created (as expected)")
+        else:
+            logger.warning(f"✗ {file} was created (unexpected)")
 
 def test_signal_scanner_with_plots():
-    """Test that signal scanner works with plot generation"""
-    print("\nTesting signal scanner with plot generation...")
-    
+    """Test signal scanner with plot generation."""
     try:
+        logger.info("\nTesting signal scanner with plot generation...")
+        
+        from signal_scanner import SignalScanner
         scanner = SignalScanner()
-        scanner.run(generate_plots=True)
-        print("✓ Signal scanner completed successfully with plots")
         
-        # Check that plot files were created
-        plot_files = ['composite_signal.png', 'correlations.png']
-        for file in plot_files:
-            if os.path.exists(file):
-                print(f"✓ {file} was created")
-            else:
-                print(f"✗ {file} was not created")
-                
+        # Run scan with plots
+        results = scanner.run(generate_plots=True)
+        
+        if 'error' in results:
+            logger.error(f"Signal scanner failed: {results['error']}")
+            return False
+        
+        logger.info("✓ Signal scanner completed successfully with plots")
+        return True
+        
     except Exception as e:
-        print(f"✗ Signal scanner failed: {e}")
+        logger.error(f"✗ Signal scanner failed: {e}")
         return False
-        
-    return True
 
-if __name__ == '__main__':
-    print("Testing GUI fixes...")
+def test_plot_file_creation():
+    """Test that plot files are created when generate_plots=True."""
+    plot_files = ['correlations.png', 'composite_signal.png']
     
-    success1 = test_signal_scanner_no_plots()
+    for file in plot_files:
+        if os.path.exists(file):
+            logger.info(f"✓ {file} was created")
+        else:
+            logger.warning(f"✗ {file} was not created")
+
+def main():
+    """Run all tests."""
+    logger.info("Testing GUI fixes...")
+    
+    # Test without plots
+    success1 = test_signal_scanner_without_plots()
+    test_file_creation()
+    
+    # Test with plots
     success2 = test_signal_scanner_with_plots()
+    test_plot_file_creation()
     
     if success1 and success2:
-        print("\n✓ All tests passed! GUI fixes are working correctly.")
+        logger.info("\n✓ All tests passed! GUI fixes are working correctly.")
     else:
-        print("\n✗ Some tests failed. Please check the issues above.") 
+        logger.error("\n✗ Some tests failed. Please check the issues above.")
+
+if __name__ == "__main__":
+    main() 

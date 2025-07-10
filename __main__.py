@@ -4,25 +4,15 @@ CLI entry point for mentat-gui package.
 
 import asyncio
 import argparse
-import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from config import get_settings
+from config import get_settings, setup_centralized_logging, get_logger
 from signal_scanner import SignalScanner
 
-logger = logging.getLogger(__name__)
-
-def setup_logging(verbose: bool = False) -> None:
-    """Setup logging configuration."""
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s %(levelname)s %(message)s',
-        handlers=[
-            logging.StreamHandler()
-        ]
-    )
+# Setup centralized logging immediately
+setup_centralized_logging('cli.log')
+logger = get_logger(__name__)
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
@@ -114,7 +104,6 @@ def parse_date(date_str: str) -> datetime:
 async def main() -> None:
     """Main CLI function."""
     args = parse_args()
-    setup_logging(args.verbose)
     
     settings = get_settings()
     
@@ -163,30 +152,30 @@ async def main() -> None:
         # Save results
         scanner.save_results(results, output_dir)
         
-        # Print summary
-        print(f"\nScan Results:")
-        print(f"  Period: {start.date()} to {end.date()}")
-        print(f"  Series analyzed: {results['series_count']}")
-        print(f"  Data points: {results['data_points']}")
-        print(f"  Max lag tested: {results['max_lag']}")
+        # Log summary
+        logger.info("Scan Results:")
+        logger.info(f"  Period: {start.date()} to {end.date()}")
+        logger.info(f"  Series analyzed: {results['series_count']}")
+        logger.info(f"  Data points: {results['data_points']}")
+        logger.info(f"  Max lag tested: {results['max_lag']}")
         
         if not results['top_correlations'].empty:
-            print(f"\nTop correlations:")
+            logger.info("Top correlations:")
             for _, row in results['top_correlations'].iterrows():
-                print(f"  {row['lead_series']} → {row['lag_series']} "
-                      f"(lag: {row['lag']:2d}, corr: {row['correlation']:.3f})")
+                logger.info(f"  {row['lead_series']} → {row['lag_series']} "
+                           f"(lag: {row['lag']:2d}, corr: {row['correlation']:.3f})")
         
         # Generate plots if requested
         if not args.no_plots:
             await generate_plots(results, output_dir)
         
-        print(f"\nResults saved to: {output_dir}")
+        logger.info(f"Results saved to: {output_dir}")
         
     except Exception as e:
         logger.error(f"Scan failed: {e}")
         if args.verbose:
             import traceback
-            traceback.print_exc()
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
 async def generate_plots(results: dict, output_dir: Path) -> None:
     """Generate plots from scan results."""
@@ -213,23 +202,27 @@ async def generate_plots(results: dict, output_dir: Path) -> None:
             plt.tight_layout()
             plt.savefig(output_dir / 'correlations.png', dpi=300, bbox_inches='tight')
             plt.close()
+            
+            logger.info("Generated correlation heatmap")
         
-        # Composite signal
-        if not results['composite_signal'].empty:
+        # Composite signal plot
+        if 'composite_signal' in results and results['composite_signal'] is not None:
             plt.figure(figsize=(12, 6))
             results['composite_signal'].plot()
             plt.title('Composite Signal')
             plt.xlabel('Date')
-            plt.ylabel('Z-Score')
-            plt.grid(True, alpha=0.3)
+            plt.ylabel('Signal Strength')
+            plt.grid(True)
             plt.tight_layout()
             plt.savefig(output_dir / 'composite_signal.png', dpi=300, bbox_inches='tight')
             plt.close()
+            
+            logger.info("Generated composite signal plot")
             
     except ImportError:
         logger.warning("matplotlib not available - skipping plots")
     except Exception as e:
         logger.warning(f"Failed to generate plots: {e}")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main()) 
