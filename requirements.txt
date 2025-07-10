@@ -1,0 +1,12 @@
+scipy
+pytrends
+PyQt5
+pandas
+numpy
+lxml
+python-dateutil
+pytz
+urllib3
+certifi
+six 
+matplotlib 

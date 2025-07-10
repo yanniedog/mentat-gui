@@ -1,0 +1,10 @@
+{
+  "series_list": [
+    { "name": "Gold Futures", "source": "fred", "symbol": "GOLDPMGBD228NLBM" },
+    { "name": "Fear & Greed", "source": "fng", "symbol": null },
+    { "name": "BTC Trends", "source": "trends", "symbol": "bitcoin" }
+  ],
+  "max_lag": 5,
+  "top_n": 2,
+  "lookback_days": 365
+} 
