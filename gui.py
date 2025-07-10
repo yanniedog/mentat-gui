@@ -16,7 +16,10 @@ import matplotlib.pyplot as plt
 
 from data_fetcher import DataFetcher
 from signal_scanner import SignalScanner
-from config import LOG_DIR
+from config import LOG_DIR, setup_abort_on_warning_or_error
+
+# Setup INSTANT abort mechanism for GUI
+setup_abort_on_warning_or_error('gui.log')
 
 # Setup GUI logging
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -29,14 +32,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-# Log warnings and errors but don't abort
-class WarningErrorHandler(logging.Handler):
-    def emit(self, record):
-        if record.levelno >= logging.WARNING:
-            print(f"Warning/Error: {record.levelname} - {record.getMessage()}")
-
-logging.getLogger().addHandler(WarningErrorHandler())
 
 class WorkerThread(QThread):
     finished = pyqtSignal(object)
@@ -52,9 +47,10 @@ class WorkerThread(QThread):
         try:
             result = self.fn(*self.args, **self.kwargs)
             self.finished.emit(result)
-        except Exception:
-            err = traceback.format_exc()
-            self.error.emit(err)
+        except Exception as e:
+            # INSTANTLY abort on any exception in worker thread
+            logger.error(f"WORKER THREAD EXCEPTION: {type(e).__name__}: {e}")
+            os._exit(1)  # Force immediate exit
 
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
@@ -125,6 +121,11 @@ class MainWindow(QMainWindow):
         self.log_box.append(msg)
         logger.info(msg)
         
+    def on_error(self, err):
+        # INSTANTLY abort on any error instead of showing message box
+        logger.error(f"GUI ERROR: {err}")
+        os._exit(1)  # Force immediate exit
+
     def load_existing_data(self):
         """Load existing data files if they exist"""
         try:
@@ -160,8 +161,10 @@ class MainWindow(QMainWindow):
                             s = pd.read_csv(f'{safe_name}.csv', index_col=0, parse_dates=True).squeeze()
                             self.series_data[name] = s
                             self.series_dropdown.addItem(name)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # INSTANTLY abort on any error loading data
+                        logger.error(f"ERROR LOADING SERIES {name}: {e}")
+                        os._exit(1)
                         
                 self.series_dropdown.blockSignals(False)
                         
@@ -170,27 +173,39 @@ class MainWindow(QMainWindow):
                 self.plot_selected_series()
                 
         except Exception as e:
-            self.log(f'Error loading existing data: {e}')
+            # INSTANTLY abort on any error loading data
+            logger.error(f"ERROR LOADING EXISTING DATA: {e}")
+            os._exit(1)
 
     def start_fetch(self):
-        self.fetch_btn.setEnabled(False)
-        self.log('Starting data fetch...')
-        self.thread = WorkerThread(DataFetcher().download)
-        self.thread.finished.connect(self.on_fetch_done)
-        self.thread.error.connect(self.on_error)
-        self.thread.start()
+        try:
+            self.fetch_btn.setEnabled(False)
+            self.log('Starting data fetch...')
+            self.thread = WorkerThread(DataFetcher().download)
+            self.thread.finished.connect(self.on_fetch_done)
+            self.thread.error.connect(self.on_error)
+            self.thread.start()
+        except Exception as e:
+            # INSTANTLY abort on any error starting fetch
+            logger.error(f"ERROR STARTING FETCH: {e}")
+            os._exit(1)
 
     def on_fetch_done(self, _):
         self.log('Data fetch complete')
         self.fetch_btn.setEnabled(True)
 
     def start_scan(self):
-        self.scan_btn.setEnabled(False)
-        self.log('Starting signal scan...')
-        self.thread = WorkerThread(SignalScanner().run, generate_plots=False)
-        self.thread.finished.connect(self.on_scan_done)
-        self.thread.error.connect(self.on_error)
-        self.thread.start()
+        try:
+            self.scan_btn.setEnabled(False)
+            self.log('Starting signal scan...')
+            self.thread = WorkerThread(SignalScanner().run, generate_plots=False)
+            self.thread.finished.connect(self.on_scan_done)
+            self.thread.error.connect(self.on_error)
+            self.thread.start()
+        except Exception as e:
+            # INSTANTLY abort on any error starting scan
+            logger.error(f"ERROR STARTING SCAN: {e}")
+            os._exit(1)
 
     def on_scan_done(self, _):
         self.log('Signal scan complete')
@@ -202,29 +217,27 @@ class MainWindow(QMainWindow):
         self.plot_selected_series()
 
     def plot_selected_series(self):
-        import pandas as pd
-        sel = self.series_dropdown.currentText()
-        self.canvas1.ax.clear()
-        if sel == 'Composite Signal' and self.composite is not None:
-            self.canvas1.ax.plot(self.composite.index, self.composite.values, label='Composite Signal')
-            self.canvas1.ax.legend()
-        elif sel in self.series_data:
-            s = self.series_data[sel]
-            self.canvas1.ax.plot(s.index, s.values, label=sel)
-            self.canvas1.ax.legend()
-        self.canvas1.draw()
-        # Always plot top correlations in canvas2
-        self.canvas2.ax.clear()
-        if self.top_corr is not None:
-            self.top_corr.set_index('series')['corr'].plot(kind='bar', ax=self.canvas2.ax)
-        self.canvas2.draw()
-
-    def on_error(self, err):
-        self.log('Error occurred:')
-        self.log(err)
-        QMessageBox.critical(self, 'Error', err)
-        self.fetch_btn.setEnabled(True)
-        self.scan_btn.setEnabled(True)
+        try:
+            import pandas as pd
+            sel = self.series_dropdown.currentText()
+            self.canvas1.ax.clear()
+            if sel == 'Composite Signal' and self.composite is not None:
+                self.canvas1.ax.plot(self.composite.index, self.composite.values, label='Composite Signal')
+                self.canvas1.ax.legend()
+            elif sel in self.series_data:
+                s = self.series_data[sel]
+                self.canvas1.ax.plot(s.index, s.values, label=sel)
+                self.canvas1.ax.legend()
+            self.canvas1.draw()
+            # Always plot top correlations in canvas2
+            self.canvas2.ax.clear()
+            if self.top_corr is not None:
+                self.top_corr.set_index('series')['corr'].plot(kind='bar', ax=self.canvas2.ax)
+            self.canvas2.draw()
+        except Exception as e:
+            # INSTANTLY abort on any plotting error
+            logger.error(f"PLOTTING ERROR: {e}")
+            os._exit(1)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
